@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 
 # ---------- Tensor / PIL helpers ----------
@@ -113,27 +113,48 @@ def _foreground_mask(
     return _edge_connected_white_foreground(image, threshold, feather)
 
 
-def _expand_mask(mask: Image.Image, radius: int) -> Image.Image:
+def _merge_close_fragments(mask: Image.Image, border_radius: int) -> Image.Image:
     """
-    Create a rounded, merged sticker silhouette.
+    Join nearby paint flecks/splashes into a more practical single cut shape.
 
-    The original implementation used Pillow MaxFilter, which expands with a
-    square kernel and can leave visible staircase/block artefacts around curved
-    artwork. A Gaussian-distance style expansion is much more isotropic: close
-    fragments naturally merge and the resulting cut line is rounded.
+    Watercolour artwork often contains small islands separated by only a few
+    pixels.  Treating every island independently produces lots of tiny white
+    halos and awkward mini-cutlines.  This performs a soft radial close: expand
+    just enough to bridge nearby fragments, then contract most of that temporary
+    growth again.  The original subject mask is always preserved.
     """
+    hard = mask.filter(ImageFilter.GaussianBlur(radius=0.55))
+    hard = hard.point(lambda p: 255 if p >= 96 else 0)
+
+    # Scale the bridge distance from the requested border, but cap it so large
+    # borders do not swallow intentional negative space.
+    merge_radius = max(1.0, min(14.0, float(border_radius) * 0.28))
+    if merge_radius <= 1.05:
+        return hard
+
+    bridge = hard.filter(ImageFilter.GaussianBlur(radius=merge_radius))
+    bridge = bridge.point(lambda p: 255 if p >= 44 else 0)
+
+    # Contract the temporary bridge so it mostly fills gaps rather than simply
+    # fattening the whole subject.  Gaussian thresholding keeps the geometry
+    # rounded instead of introducing square morphology artefacts.
+    bridge = bridge.filter(ImageFilter.GaussianBlur(radius=merge_radius * 0.82))
+    bridge = bridge.point(lambda p: 255 if p >= 176 else 0)
+
+    return ImageChops.lighter(hard, bridge)
+
+
+def _expand_mask(mask: Image.Image, radius: int) -> Image.Image:
+    """Create a rounded, watercolour-friendly sticker silhouette."""
     if radius <= 0:
         return mask.copy()
 
-    # Normalise tiny anti-aliased/noisy gaps before growing the cut silhouette.
-    # A very small close operation joins 1 px cracks without materially changing
-    # the artwork shape.
-    clean = mask.filter(ImageFilter.GaussianBlur(radius=0.7))
-    clean = clean.point(lambda p: 255 if p >= 96 else 0)
-    clean = clean.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+    # Merge close fragments first so nearby leaves, splashes and loose paint
+    # marks share one practical cut silhouette rather than dozens of tiny halos.
+    clean = _merge_close_fragments(mask, radius)
 
-    # Smooth radial expansion. The 0.72 factor + low threshold approximates the
-    # requested border radius while avoiding the boxy geometry of MaxFilter.
+    # Smooth radial expansion.  Gaussian growth is much more isotropic than a
+    # square MaxFilter and gives rounded die-cut style corners.
     sigma = max(0.8, float(radius) * 0.72)
     expanded = clean.filter(ImageFilter.GaussianBlur(radius=sigma))
     expanded = expanded.point(lambda p: 255 if p >= 55 else 0)
