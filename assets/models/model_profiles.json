@@ -1,0 +1,92 @@
+{
+  "profiles": {
+    "M_XSS_01": {
+      "sex": "male",
+      "size_band": "XS/S",
+      "age": 27,
+      "appearance": "White / European",
+      "hair": "short brown hair",
+      "build": "lean frame, narrower shoulders",
+      "height_impression": "average",
+      "base_layer": "plain neutral fitted athletic top and shorts",
+      "image": "M_XSS_01/front.webp"
+    },
+    "M_ML_01": {
+      "sex": "male",
+      "size_band": "M/L",
+      "age": 31,
+      "appearance": "South Asian / Indian",
+      "hair": "short black slightly wavy hair",
+      "build": "average balanced frame",
+      "height_impression": "slightly tall",
+      "base_layer": "plain neutral fitted athletic top and shorts",
+      "image": "M_ML_01/front.webp"
+    },
+    "M_XL2XL_01": {
+      "sex": "male",
+      "size_band": "XL/2XL",
+      "age": 38,
+      "appearance": "East Asian / Chinese",
+      "hair": "short dark hair",
+      "build": "broad chest, solid frame",
+      "height_impression": "average",
+      "base_layer": "plain neutral fitted athletic top and shorts",
+      "image": "M_XL2XL_01/front.webp"
+    },
+    "M_3XL5XL_01": {
+      "sex": "male",
+      "size_band": "3XL/5XL",
+      "age": 42,
+      "appearance": "Black / African diaspora",
+      "hair": "close-cropped black hair",
+      "build": "larger broad frame",
+      "height_impression": "tall",
+      "base_layer": "plain neutral fitted athletic top and shorts",
+      "image": "M_3XL5XL_01/front.webp"
+    },
+    "F_XSS_01": {
+      "sex": "female",
+      "size_band": "XS/S",
+      "age": 28,
+      "appearance": "East Asian / Chinese",
+      "hair": "shoulder-length dark hair",
+      "build": "petite slim frame",
+      "height_impression": "shorter",
+      "base_layer": "plain neutral fitted athletic top and shorts or leggings",
+      "image": "F_XSS_01/front.webp"
+    },
+    "F_ML_01": {
+      "sex": "female",
+      "size_band": "M/L",
+      "age": 33,
+      "appearance": "Black / African diaspora",
+      "hair": "natural curly dark hair",
+      "build": "average balanced frame",
+      "height_impression": "average",
+      "base_layer": "plain neutral fitted athletic top and shorts or leggings",
+      "image": "F_ML_01/front.webp"
+    },
+    "F_XL2XL_01": {
+      "sex": "female",
+      "size_band": "XL/2XL",
+      "age": 39,
+      "appearance": "White / European",
+      "hair": "medium-length auburn hair",
+      "build": "fuller broad-balanced frame",
+      "height_impression": "slightly tall",
+      "base_layer": "plain neutral fitted athletic top and shorts or leggings",
+      "image": "F_XL2XL_01/front.webp"
+    },
+    "F_3XL5XL_01": {
+      "sex": "female",
+      "size_band": "3XL/5XL",
+      "age": 43,
+      "appearance": "South Asian / Indian",
+      "hair": "long dark hair",
+      "build": "larger full frame",
+      "height_impression": "average",
+      "base_layer": "plain neutral fitted athletic top and shorts or leggings",
+      "image": "F_3XL5XL_01/front.webp"
+    }
+  }
+}
