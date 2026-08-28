@@ -36,8 +36,73 @@ def _pil_mask_to_tensor(mask: Image.Image) -> torch.Tensor:
 
 
 def _stack_images(images: list[torch.Tensor]) -> torch.Tensor:
-    # Outputs are expected to share dimensions because the mockup canvas is fixed.
     return torch.cat(images, dim=0)
+
+
+# ---------- Generic mask helpers ----------
+
+def _hard_mask(mask: Image.Image, threshold: int = 96) -> Image.Image:
+    m = mask.convert("L").filter(ImageFilter.GaussianBlur(radius=0.45))
+    return m.point(lambda p: 255 if p >= threshold else 0)
+
+
+def _soft_grow_or_shrink(mask: Image.Image, pixels: int) -> Image.Image:
+    """
+    Rounded mask inset/outset without square MaxFilter geometry.
+
+    Positive pixels shrink/inset the active area.
+    Negative pixels expand/outset the active area.
+    """
+    px = int(pixels)
+    if px == 0:
+        return mask.convert("L").copy()
+
+    hard = _hard_mask(mask, 128)
+    radius = max(0.8, abs(px) * 0.72)
+    blurred = hard.filter(ImageFilter.GaussianBlur(radius=radius))
+
+    if px > 0:
+        out = blurred.point(lambda p: 255 if p >= 205 else 0)
+    else:
+        out = blurred.point(lambda p: 255 if p >= 50 else 0)
+
+    return out.filter(ImageFilter.GaussianBlur(radius=0.45))
+
+
+def _approx_remove_small_islands(mask: Image.Image, minimum_size: int) -> Image.Image:
+    """
+    Approximate small-island suppression for the CUT silhouette.
+
+    minimum_size is an approximate diameter in pixels, not component area.
+    It intentionally acts only on the cut source by default so delicate
+    watercolour splashes can remain visible in the artwork.
+    """
+    size = max(0, int(minimum_size))
+    if size <= 1:
+        return _hard_mask(mask)
+
+    kernel = min(31, max(3, size if size % 2 == 1 else size + 1))
+    hard = _hard_mask(mask)
+    opened = hard.filter(ImageFilter.MinFilter(kernel)).filter(ImageFilter.MaxFilter(kernel))
+    return opened
+
+
+def _mask_from_image(image: Image.Image, channel: str, invert: bool) -> Image.Image:
+    rgb = image.convert("RGB")
+    if channel == "red":
+        mask = rgb.getchannel("R")
+    elif channel == "green":
+        mask = rgb.getchannel("G")
+    elif channel == "blue":
+        mask = rgb.getchannel("B")
+    else:
+        arr = np.asarray(rgb, dtype=np.float32)
+        lum = np.rint(arr[..., 0] * 0.299 + arr[..., 1] * 0.587 + arr[..., 2] * 0.114).astype(np.uint8)
+        mask = Image.fromarray(lum, "L")
+
+    if invert:
+        mask = ImageOps.invert(mask)
+    return mask
 
 
 # ---------- Sticker extraction ----------
@@ -56,11 +121,8 @@ def _edge_connected_white_foreground(
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
     candidate = np.all(rgb >= int(threshold), axis=2).astype(np.uint8) * 255
     work = Image.fromarray(candidate, "L")
-    draw = ImageDraw.Draw(work)
     w, h = work.size
 
-    # Seed flood-fill from many edge points. Usually the first seed fills the
-    # whole outer background; extra seeds handle split white regions along edges.
     stride = max(1, min(w, h) // 128)
     edge_points = []
     for x in range(0, w, stride):
@@ -69,8 +131,6 @@ def _edge_connected_white_foreground(
     for y in range(0, h, stride):
         edge_points.append((0, y))
         edge_points.append((w - 1, y))
-
-    # Ensure exact corners/endpoints are covered.
     edge_points.extend([(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)])
 
     for xy in edge_points:
@@ -78,7 +138,6 @@ def _edge_connected_white_foreground(
             ImageDraw.floodfill(work, xy, 128, thresh=0)
 
     filled = np.asarray(work, dtype=np.uint8)
-    # 128 = edge-connected candidate background. Everything else is foreground.
     fg = np.where(filled == 128, 0, 255).astype(np.uint8)
     mask = Image.fromarray(fg, "L")
 
@@ -91,7 +150,6 @@ def _all_white_foreground(image: Image.Image, threshold: int, feather: float) ->
     """Simpler mode: every white-ish pixel becomes transparent."""
     rgb = np.asarray(image.convert("RGB"), dtype=np.float32)
     t = float(threshold)
-    # Soft transition from threshold-12 to threshold for anti-aliased edges.
     low = max(0.0, t - 12.0)
     whiteness = np.min(rgb, axis=2)
     bg = np.clip((whiteness - low) / max(1.0, t - low), 0.0, 1.0)
@@ -113,53 +171,48 @@ def _foreground_mask(
     return _edge_connected_white_foreground(image, threshold, feather)
 
 
-def _merge_close_fragments(mask: Image.Image, border_radius: int) -> Image.Image:
-    """
-    Join nearby paint flecks/splashes into a more practical single cut shape.
+def _merge_close_fragments(
+    mask: Image.Image,
+    border_radius: int,
+    merge_strength: float,
+) -> Image.Image:
+    """Join nearby paint flecks/splashes into a more practical cut shape."""
+    hard = _hard_mask(mask)
+    strength = max(0.0, float(merge_strength))
+    if strength <= 0.001:
+        return hard
 
-    Watercolour artwork often contains small islands separated by only a few
-    pixels.  Treating every island independently produces lots of tiny white
-    halos and awkward mini-cutlines.  This performs a soft radial close: expand
-    just enough to bridge nearby fragments, then contract most of that temporary
-    growth again.  The original subject mask is always preserved.
-    """
-    hard = mask.filter(ImageFilter.GaussianBlur(radius=0.55))
-    hard = hard.point(lambda p: 255 if p >= 96 else 0)
-
-    # Scale the bridge distance from the requested border, but cap it so large
-    # borders do not swallow intentional negative space.
-    merge_radius = max(1.0, min(14.0, float(border_radius) * 0.28))
+    merge_radius = max(
+        1.0,
+        min(24.0, float(border_radius) * 0.28 * strength),
+    )
     if merge_radius <= 1.05:
         return hard
 
     bridge = hard.filter(ImageFilter.GaussianBlur(radius=merge_radius))
     bridge = bridge.point(lambda p: 255 if p >= 44 else 0)
 
-    # Contract the temporary bridge so it mostly fills gaps rather than simply
-    # fattening the whole subject.  Gaussian thresholding keeps the geometry
-    # rounded instead of introducing square morphology artefacts.
     bridge = bridge.filter(ImageFilter.GaussianBlur(radius=merge_radius * 0.82))
     bridge = bridge.point(lambda p: 255 if p >= 176 else 0)
 
     return ImageChops.lighter(hard, bridge)
 
 
-def _expand_mask(mask: Image.Image, radius: int) -> Image.Image:
+def _expand_mask(
+    mask: Image.Image,
+    radius: int,
+    merge_strength: float = 1.0,
+) -> Image.Image:
     """Create a rounded, watercolour-friendly sticker silhouette."""
     if radius <= 0:
         return mask.copy()
 
-    # Merge close fragments first so nearby leaves, splashes and loose paint
-    # marks share one practical cut silhouette rather than dozens of tiny halos.
-    clean = _merge_close_fragments(mask, radius)
+    clean = _merge_close_fragments(mask, radius, merge_strength)
 
-    # Smooth radial expansion.  Gaussian growth is much more isotropic than a
-    # square MaxFilter and gives rounded die-cut style corners.
     sigma = max(0.8, float(radius) * 0.72)
     expanded = clean.filter(ImageFilter.GaussianBlur(radius=sigma))
     expanded = expanded.point(lambda p: 255 if p >= 55 else 0)
 
-    # Restore a soft anti-aliased edge after thresholding.
     return expanded.filter(ImageFilter.GaussianBlur(radius=0.75))
 
 
@@ -169,9 +222,18 @@ def _crop_with_padding(
     sticker_mask: Image.Image,
     padding: int,
 ) -> Tuple[Image.Image, Image.Image, Image.Image]:
-    bbox = sticker_mask.getbbox()
+    # Include any preserved loose artwork in the crop even when it has been
+    # intentionally excluded from the physical cut silhouette.
+    crop_extent = ImageChops.lighter(
+        sticker_mask.convert("L"),
+        subject_mask.convert("L"),
+    )
+    bbox = crop_extent.getbbox()
     if bbox is None:
-        raise ValueError("No sticker foreground detected. Lower white_threshold or use a different removal mode.")
+        raise ValueError(
+            "No sticker foreground detected. Raise white_threshold to preserve paler artwork "
+            "or use a different removal mode."
+        )
 
     l, t, r, b = bbox
     l = max(0, l - padding)
@@ -190,43 +252,76 @@ def _make_sticker(
     border_size: int,
     border_softness: float,
     border_rgb: Tuple[int, int, int],
+    merge_strength: float = 1.0,
+    minimum_island_size: int = 0,
+    preserve_loose_splashes: bool = True,
 ) -> Tuple[Image.Image, Image.Image, Image.Image]:
     art = image.convert("RGB")
-    subject_mask = _foreground_mask(art, removal_mode, white_threshold, edge_feather)
+    original_subject_mask = _foreground_mask(
+        art,
+        removal_mode,
+        white_threshold,
+        edge_feather,
+    )
 
-    # Give the cutline real working room BEFORE growing the border. Without
-    # this, artwork that reaches an input edge can only expand inward and the
-    # sticker outline gets visibly chopped flat at that edge. White padding is
-    # used for the RGB art while the mask gets transparent/zero padding.
-    work_padding = max(16, int(border_size) * 2 + int(round(float(border_softness) * 4.0)) + 8)
+    # Cutline controls are deliberately separate from artwork visibility.
+    # This lets the user suppress tiny cut islands while still keeping loose
+    # watercolour marks visible when preserve_loose_splashes is enabled.
+    cut_source_mask = _approx_remove_small_islands(
+        original_subject_mask,
+        minimum_island_size,
+    )
+
+    if preserve_loose_splashes:
+        visible_subject_mask = original_subject_mask
+    else:
+        visible_subject_mask = ImageChops.multiply(
+            original_subject_mask.convert("L"),
+            cut_source_mask.convert("L"),
+        )
+
+    work_padding = max(
+        16,
+        int(border_size) * 2
+        + int(round(float(border_softness) * 4.0))
+        + int(round(float(border_size) * max(0.0, float(merge_strength)) * 0.4))
+        + 8,
+    )
+
     art = ImageOps.expand(art, border=work_padding, fill=(255, 255, 255))
-    subject_mask = ImageOps.expand(subject_mask, border=work_padding, fill=0)
+    visible_subject_mask = ImageOps.expand(visible_subject_mask, border=work_padding, fill=0)
+    cut_source_mask = ImageOps.expand(cut_source_mask, border=work_padding, fill=0)
 
-    sticker_mask = _expand_mask(subject_mask, border_size)
+    sticker_mask = _expand_mask(
+        cut_source_mask,
+        border_size,
+        merge_strength=merge_strength,
+    )
 
     if border_softness > 0:
-        sticker_mask = sticker_mask.filter(ImageFilter.GaussianBlur(radius=float(border_softness)))
+        sticker_mask = sticker_mask.filter(
+            ImageFilter.GaussianBlur(radius=float(border_softness))
+        )
 
-    art, subject_mask, sticker_mask = _crop_with_padding(
+    art, visible_subject_mask, sticker_mask = _crop_with_padding(
         art,
-        subject_mask,
+        visible_subject_mask,
         sticker_mask,
         padding=max(4, border_size // 2 + 2),
     )
 
-    # White/coloured border underneath, original art clipped above it.
     sticker_rgba = Image.new("RGBA", art.size, (*border_rgb, 0))
     border_layer = Image.new("RGBA", art.size, (*border_rgb, 255))
     sticker_rgba.paste(border_layer, (0, 0), sticker_mask)
 
     art_rgba = art.convert("RGBA")
-    art_rgba.putalpha(subject_mask)
+    art_rgba.putalpha(visible_subject_mask)
     sticker_rgba = Image.alpha_composite(sticker_rgba, art_rgba)
 
-    return sticker_rgba, subject_mask, sticker_mask
+    return sticker_rgba, visible_subject_mask, sticker_mask
 
 
-# ---------- Mockup composition ----------
+# ---------- Shared composition helpers ----------
 
 def _contain_size(src_w: int, src_h: int, max_w: int, max_h: int) -> Tuple[int, int]:
     scale = min(max_w / max(1, src_w), max_h / max(1, src_h))
@@ -267,7 +362,6 @@ def _make_canvas(
 ) -> Image.Image:
     if canvas_mode == "background" and background is not None:
         bg = _tensor_image_to_pil(background, background_index).convert("RGB")
-        # Cover crop background to canvas dimensions.
         src_ratio = bg.width / max(1, bg.height)
         dst_ratio = width / max(1, height)
         if src_ratio > dst_ratio:
@@ -300,7 +394,6 @@ def _shadow_from_mask(mask: Image.Image, blur: float, opacity: float) -> Image.I
 
 
 def _paste_clipped(base: Image.Image, overlay: Image.Image, xy: Tuple[int, int]) -> None:
-    """Paste RGBA overlay even if partly outside the canvas."""
     x, y = xy
     bw, bh = base.size
     ow, oh = overlay.size
@@ -315,6 +408,141 @@ def _paste_clipped(base: Image.Image, overlay: Image.Image, xy: Tuple[int, int])
     crop = overlay.crop((left - x, top - y, right - x, bottom - y))
     base.alpha_composite(crop, (left, top))
 
+
+# ---------- Product template helpers ----------
+
+def _fit_artwork_to_box(
+    artwork: Image.Image,
+    box_w: int,
+    box_h: int,
+    fit_mode: str,
+    scale_percent: float,
+    x_offset: int,
+    y_offset: int,
+    rotation: float,
+) -> Image.Image:
+    """Return an RGB artwork tile exactly box_w x box_h."""
+    src = artwork.convert("RGB")
+    box_w = max(1, int(box_w))
+    box_h = max(1, int(box_h))
+    scale_factor = max(0.01, float(scale_percent) / 100.0)
+
+    if fit_mode == "stretch":
+        target_w = max(1, round(box_w * scale_factor))
+        target_h = max(1, round(box_h * scale_factor))
+    else:
+        if fit_mode == "contain":
+            base_scale = min(box_w / max(1, src.width), box_h / max(1, src.height))
+        else:
+            base_scale = max(box_w / max(1, src.width), box_h / max(1, src.height))
+        base_scale *= scale_factor
+        target_w = max(1, round(src.width * base_scale))
+        target_h = max(1, round(src.height * base_scale))
+
+    resized = src.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+    if abs(float(rotation)) > 0.001:
+        resized = resized.rotate(
+            float(rotation),
+            resample=Image.Resampling.BICUBIC,
+            expand=True,
+            fillcolor=(255, 255, 255),
+        )
+
+    tile = Image.new("RGB", (box_w, box_h), (255, 255, 255))
+    x = (box_w - resized.width) // 2 + int(x_offset)
+    y = (box_h - resized.height) // 2 + int(y_offset)
+
+    left = max(0, x)
+    top = max(0, y)
+    right = min(box_w, x + resized.width)
+    bottom = min(box_h, y + resized.height)
+    if right > left and bottom > top:
+        crop = resized.crop((left - x, top - y, right - x, bottom - y))
+        tile.paste(crop, (left, top))
+
+    return tile
+
+
+def _apply_template_shading(
+    fitted: Image.Image,
+    template: Image.Image,
+    strength: float,
+) -> Image.Image:
+    s = max(0.0, min(1.0, float(strength)))
+    if s <= 0.0:
+        return fitted
+
+    art = np.asarray(fitted.convert("RGB"), dtype=np.float32)
+    tmpl = np.asarray(template.convert("RGB"), dtype=np.float32)
+    lum = tmpl[..., 0] * 0.299 + tmpl[..., 1] * 0.587 + tmpl[..., 2] * 0.114
+
+    shade = (1.0 - s) + s * (lum / 255.0)
+    out = np.clip(art * shade[..., None], 0.0, 255.0).astype(np.uint8)
+    return Image.fromarray(out, "RGB")
+
+
+def _template_mockup_single(
+    artwork: Image.Image,
+    template: Image.Image,
+    mask_image: Image.Image,
+    fit_mode: str,
+    mask_channel: str,
+    invert_mask: bool,
+    scale_percent: float,
+    x_offset: int,
+    y_offset: int,
+    rotation: float,
+    mask_inset: int,
+    edge_blend: float,
+    shading_strength: float,
+) -> Tuple[Image.Image, Image.Image, Image.Image]:
+    template_rgb = template.convert("RGB")
+    mask = _mask_from_image(mask_image, mask_channel, invert_mask)
+
+    if mask_inset != 0:
+        mask = _soft_grow_or_shrink(mask, int(mask_inset))
+
+    geometry_mask = _hard_mask(mask, 32)
+    bbox = geometry_mask.getbbox()
+    if bbox is None:
+        raise ValueError("Template mask contains no active placement area.")
+
+    l, t, r, b = bbox
+    box_w = max(1, r - l)
+    box_h = max(1, b - t)
+
+    tile = _fit_artwork_to_box(
+        artwork,
+        box_w,
+        box_h,
+        fit_mode,
+        scale_percent,
+        x_offset,
+        y_offset,
+        rotation,
+    )
+
+    fitted_full = Image.new("RGB", template_rgb.size, (255, 255, 255))
+    fitted_full.paste(tile, (l, t))
+
+    shaded = _apply_template_shading(
+        fitted_full,
+        template_rgb,
+        shading_strength,
+    )
+
+    effective_mask = mask.convert("L")
+    if edge_blend > 0:
+        effective_mask = effective_mask.filter(
+            ImageFilter.GaussianBlur(radius=float(edge_blend))
+        )
+
+    result = Image.composite(shaded, template_rgb, effective_mask)
+    return result, fitted_full, effective_mask
+
+
+# ---------- Nodes ----------
 
 class OPSFeaturedStickerMockup:
     """Create a sticker-style product/featured image from artwork on white."""
@@ -343,6 +571,9 @@ class OPSFeaturedStickerMockup:
             },
             "optional": {
                 "background": ("IMAGE",),
+                "merge_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.1}),
+                "minimum_island_size": ("INT", {"default": 0, "min": 0, "max": 31, "step": 2}),
+                "preserve_loose_splashes": ("BOOLEAN", {"default": True}),
             },
         }
 
@@ -352,7 +583,7 @@ class OPSFeaturedStickerMockup:
     CATEGORY = "OPS/Mockups"
     DESCRIPTION = (
         "Removes an outer white background from artwork, adds a sticker border and shadow, "
-        "then places it onto a featured-image/mockup canvas."
+        "and provides optional watercolour cut-shape controls."
     )
 
     def make_mockup(
@@ -375,13 +606,15 @@ class OPSFeaturedStickerMockup:
         shadow_x: int,
         shadow_y: int,
         background: Optional[torch.Tensor] = None,
+        merge_strength: float = 1.0,
+        minimum_island_size: int = 0,
+        preserve_loose_splashes: bool = True,
     ):
         batch = artwork.shape[0] if artwork.ndim == 4 else 1
         mockups = []
         sticker_rgbs = []
         sticker_masks = []
 
-        # Sticker output uses a predictable square canvas so batch outputs remain stackable.
         sticker_out_size = max(512, min(2048, max(int(canvas_width), int(canvas_height))))
 
         for i in range(batch):
@@ -394,9 +627,11 @@ class OPSFeaturedStickerMockup:
                 border_size=int(border_size),
                 border_softness=float(border_softness),
                 border_rgb=(255, 255, 255),
+                merge_strength=float(merge_strength),
+                minimum_island_size=int(minimum_island_size),
+                preserve_loose_splashes=bool(preserve_loose_splashes),
             )
 
-            # Scale sticker relative to canvas, preserving aspect ratio.
             target_w = max(1, round(canvas_width * sticker_size_percent / 100.0))
             target_h = max(1, round(canvas_height * sticker_size_percent / 100.0))
             placed_sticker, placed_mask = _transform_sticker(
@@ -407,21 +642,33 @@ class OPSFeaturedStickerMockup:
                 rotation,
             )
 
-            canvas = _make_canvas(background, i, canvas_mode, canvas_width, canvas_height).convert("RGBA")
+            canvas = _make_canvas(
+                background,
+                i,
+                canvas_mode,
+                canvas_width,
+                canvas_height,
+            ).convert("RGBA")
             cx = round(canvas_width * x_percent / 100.0)
             cy = round(canvas_height * y_percent / 100.0)
             x = cx - placed_sticker.width // 2
             y = cy - placed_sticker.height // 2
 
             if shadow_opacity > 0.0:
-                shadow = _shadow_from_mask(placed_mask, shadow_blur, shadow_opacity)
-                _paste_clipped(canvas, shadow, (x + int(shadow_x), y + int(shadow_y)))
+                shadow = _shadow_from_mask(
+                    placed_mask,
+                    shadow_blur,
+                    shadow_opacity,
+                )
+                _paste_clipped(
+                    canvas,
+                    shadow,
+                    (x + int(shadow_x), y + int(shadow_y)),
+                )
 
             _paste_clipped(canvas, placed_sticker, (x, y))
             mockups.append(_pil_rgb_to_tensor(canvas.convert("RGB")))
 
-            # Separate sticker output on neutral black RGB + MASK. Consumers should use
-            # sticker_mask for alpha/compositing; black is outside the mask only.
             sw, sh = _contain_size(
                 sticker.width,
                 sticker.height,
@@ -434,7 +681,11 @@ class OPSFeaturedStickerMockup:
             py = (sticker_out_size - sh) // 2
 
             rgb_canvas = Image.new("RGB", (sticker_out_size, sticker_out_size), (0, 0, 0))
-            rgb_canvas.paste(sticker_preview.convert("RGB"), (px, py), sticker_preview.getchannel("A"))
+            rgb_canvas.paste(
+                sticker_preview.convert("RGB"),
+                (px, py),
+                sticker_preview.getchannel("A"),
+            )
             mask_canvas = Image.new("L", (sticker_out_size, sticker_out_size), 0)
             mask_canvas.paste(sticker_mask_preview, (px, py))
 
@@ -448,10 +699,114 @@ class OPSFeaturedStickerMockup:
         )
 
 
+class OPSProductTemplateMockup:
+    """
+    Put complete artwork into a supplied product template/mask.
+
+    Designed for greeting cards, badges, apparel print areas and other
+    deterministic OPS mockups where the artwork itself should remain exact.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "artwork": ("IMAGE",),
+                "template": ("IMAGE",),
+                "mask_image": ("IMAGE",),
+                "fit_mode": (["cover", "contain", "stretch"],),
+                "mask_channel": (["luminance", "red", "green", "blue"],),
+                "invert_mask": ("BOOLEAN", {"default": False}),
+                "scale_percent": ("FLOAT", {"default": 100.0, "min": 10.0, "max": 250.0, "step": 0.5}),
+                "x_offset": ("INT", {"default": 0, "min": -2048, "max": 2048, "step": 1}),
+                "y_offset": ("INT", {"default": 0, "min": -2048, "max": 2048, "step": 1}),
+                "rotation": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.25}),
+                "mask_inset": ("INT", {"default": 0, "min": -128, "max": 128, "step": 1}),
+                "edge_blend": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 32.0, "step": 0.25}),
+                "shading_strength": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "IMAGE", "MASK")
+    RETURN_NAMES = ("mockup", "fitted_artwork", "effective_mask")
+    FUNCTION = "make_template_mockup"
+    CATEGORY = "OPS/Mockups"
+    DESCRIPTION = (
+        "Fits complete artwork into a supplied template mask without removing white. "
+        "Useful for cards, badges, shirts, hoodies, totes and other product mockups."
+    )
+
+    def make_template_mockup(
+        self,
+        artwork: torch.Tensor,
+        template: torch.Tensor,
+        mask_image: torch.Tensor,
+        fit_mode: str,
+        mask_channel: str,
+        invert_mask: bool,
+        scale_percent: float,
+        x_offset: int,
+        y_offset: int,
+        rotation: float,
+        mask_inset: int,
+        edge_blend: float,
+        shading_strength: float,
+    ):
+        art_batch = artwork.shape[0] if artwork.ndim == 4 else 1
+        template_batch = template.shape[0] if template.ndim == 4 else 1
+        mask_batch = mask_image.shape[0] if mask_image.ndim == 4 else 1
+        batch = max(art_batch, template_batch, mask_batch)
+
+        mockups = []
+        fitted = []
+        masks = []
+
+        expected_size = None
+        for i in range(batch):
+            art_pil = _tensor_image_to_pil(artwork, i)
+            template_pil = _tensor_image_to_pil(template, i)
+            mask_pil = _tensor_image_to_pil(mask_image, i)
+
+            result, fitted_full, effective_mask = _template_mockup_single(
+                artwork=art_pil,
+                template=template_pil,
+                mask_image=mask_pil,
+                fit_mode=fit_mode,
+                mask_channel=mask_channel,
+                invert_mask=bool(invert_mask),
+                scale_percent=float(scale_percent),
+                x_offset=int(x_offset),
+                y_offset=int(y_offset),
+                rotation=float(rotation),
+                mask_inset=int(mask_inset),
+                edge_blend=float(edge_blend),
+                shading_strength=float(shading_strength),
+            )
+
+            if expected_size is None:
+                expected_size = result.size
+            elif result.size != expected_size:
+                raise ValueError(
+                    "Template batch images must share the same dimensions for ComfyUI batching."
+                )
+
+            mockups.append(_pil_rgb_to_tensor(result))
+            fitted.append(_pil_rgb_to_tensor(fitted_full))
+            masks.append(_pil_mask_to_tensor(effective_mask))
+
+        return (
+            _stack_images(mockups),
+            _stack_images(fitted),
+            torch.cat(masks, dim=0),
+        )
+
+
 NODE_CLASS_MAPPINGS = {
     "OPSFeaturedStickerMockup": OPSFeaturedStickerMockup,
+    "OPSProductTemplateMockup": OPSProductTemplateMockup,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "OPSFeaturedStickerMockup": "OPS Featured Sticker Mockup",
+    "OPSProductTemplateMockup": "OPS Product Template Mockup",
 }
