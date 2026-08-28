@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-ops-sticker-tools"
-version = "0.1.3"
-description = "Sticker featured-image and mockup tools for ComfyUI"
+version = "0.2.0"
+description = "OPS sticker extraction and deterministic product mockup tools for ComfyUI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
