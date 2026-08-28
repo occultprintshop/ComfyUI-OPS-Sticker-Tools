@@ -337,9 +337,9 @@ class OPSGrokPromptBuilder:
             "required": {
                 "model_reference": ("IMAGE",),
                 "design": ("IMAGE",),
-                "profile_json": ("STRING", {"multiline": True, "default": "{}"}),
-                "apparel_recipe": ("STRING", {"multiline": True, "default": "{}"}),
-                "design_recipe": ("STRING", {"multiline": True, "default": "{}"}),
+                "profile_json": ("STRING", {"forceInput": True}),
+                "apparel_recipe": ("STRING", {"forceInput": True}),
+                "design_recipe": ("STRING", {"forceInput": True}),
                 "extra_instructions": (
                     "STRING",
                     {
@@ -483,7 +483,7 @@ class OPSMockupShotPlanner:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "approved_base_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "approved_base_prompt": ("STRING", {"forceInput": True}),
                 "shot_pack": (cls.SHOT_PACKS,),
             }
         }
