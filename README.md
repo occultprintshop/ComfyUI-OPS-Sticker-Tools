@@ -1,6 +1,6 @@
 # ComfyUI OPS Sticker Tools
 
-A lightweight ComfyUI custom-node pack for OPS sticker extraction and deterministic product mockups.
+A lightweight ComfyUI custom-node pack for OPS sticker extraction, deterministic product mockups and apparel mockup workflows.
 
 ## Nodes
 
@@ -71,6 +71,87 @@ Outputs:
 
 The supplied mask image can be connected directly from the normal `IMAGE` output of a ComfyUI `LoadImage` node. White represents the product placement area by default.
 
+## v0.3.0 Apparel Mockup Pipeline
+
+New nodes appear under `OPS > Apparel`.
+
+### OPS Model Library
+
+Selects one of the fixed OPS base-model profiles and outputs:
+
+- the model reference image;
+- model ID;
+- human-readable profile summary;
+- profile JSON for downstream prompt building.
+
+The first roster contains eight adult profiles across XS/S, M/L, XL/2XL and 3XL/5XL body-size reference groups for male and female models.
+
+Approved model files can be placed under:
+
+`assets/models/<MODEL_ID>/front.webp`
+
+For example:
+
+`assets/models/M_ML_01/front.webp`
+
+Until the approved images are added, the node produces a labelled placeholder. A normal ComfyUI `IMAGE` can also be connected to **reference_override** for testing with any supplied model image while keeping the selected profile metadata.
+
+### OPS Apparel Setup
+
+Builds the garment and scene recipe including:
+
+- garment type and product name;
+- XS–5XL garment size;
+- colour and fit;
+- pose;
+- camera angle;
+- occasion/context;
+- background description.
+
+The selected model body-size reference and the actual garment size remain separate values.
+
+### OPS Design Setup
+
+Passes the original artwork through untouched while storing its intended apparel placement:
+
+- centre/full front;
+- left chest;
+- centre/full back;
+- sleeves;
+- print scale;
+- X/Y placement offset.
+
+### OPS Grok Prompt Builder
+
+Combines the selected model profile, apparel recipe and design recipe into:
+
+- a single reference-board image containing the model and exact artwork;
+- a structured Grok edit/generation prompt;
+- the complete recipe JSON.
+
+The prompt tells the image generator to preserve model identity, apparent age, body proportions and size reference while creating realistic fabric, folds, seams, shadows and print interaction. The original print artwork should still be reapplied in a deterministic finishing pass when exact reproduction is required.
+
+### OPS Approval Gate
+
+A lazy two-stage switch:
+
+- `PROOF_ONLY` requests only the proof-image branch;
+- `APPROVED` requests the full-mockup branch.
+
+The unused image branch is declared lazy so expensive downstream API generation does not need to run while the proof is still being reviewed.
+
+### OPS Mockup Shot Planner
+
+Turns an approved base prompt into a list of continuity-preserving shot prompts.
+
+Shot packs:
+
+- **essential** — front, back and two three-quarter views;
+- **standard** — adds left/right profile and seated;
+- **full** — adds kneeling, walking away, high/low angle and detail views.
+
+The planner tells downstream generation to preserve the same model, garment, size, colour, fit, artwork and scene styling across the full set.
+
 ## Workflows
 
 `workflows/OPS_Featured_Sticker_Mockup_v0.2_API.json`
@@ -91,6 +172,8 @@ Starter three-way product workflow using these filenames:
 
 It renders the same artwork to the greeting card, 30 mm badge and 55 mm badge templates.
 
+The v0.3 apparel workflow will be added after the new apparel nodes have been pulled, loaded and tested in ComfyUI.
+
 ## Install / update
 
 Clone into the ComfyUI custom nodes directory:
@@ -105,14 +188,15 @@ For an existing install:
 ```bash
 cd /Users/macbookpro/Documents/ComfyUI/custom_nodes/ComfyUI-OPS-Sticker-Tools
 git pull
-python3 -m py_compile __init__.py nodes.py
+python3 -m py_compile __init__.py nodes.py smart_sticker.py apparel_nodes.py
 ```
 
 Then restart ComfyUI.
 
 Nodes appear under:
 
-`OPS > Mockups`
+- `OPS > Mockups`
+- `OPS > Apparel`
 
 ## Dependencies
 
