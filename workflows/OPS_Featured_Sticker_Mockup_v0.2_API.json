@@ -1,0 +1,116 @@
+{
+  "1": {
+    "inputs": {
+      "image": "YOUR_ARTWORK.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Artwork"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "YOUR_BACKGROUND.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Background"
+    }
+  },
+  "3": {
+    "inputs": {
+      "artwork": [
+        "1",
+        0
+      ],
+      "remove_background": "edge white",
+      "white_threshold": 245,
+      "edge_feather": 1.2,
+      "border_size": 22,
+      "border_softness": 0.6,
+      "canvas_mode": "background",
+      "canvas_width": 1600,
+      "canvas_height": 1600,
+      "sticker_size_percent": 72.0,
+      "x_percent": 50.0,
+      "y_percent": 50.0,
+      "rotation": 0.0,
+      "shadow_opacity": 0.2,
+      "shadow_blur": 22.0,
+      "shadow_x": 14,
+      "shadow_y": 18,
+      "background": [
+        "2",
+        0
+      ],
+      "merge_strength": 1.0,
+      "minimum_island_size": 0,
+      "preserve_loose_splashes": true
+    },
+    "class_type": "OPSFeaturedStickerMockup",
+    "_meta": {
+      "title": "OPS Featured Sticker Mockup"
+    }
+  },
+  "4": {
+    "inputs": {
+      "images": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Mockup"
+    }
+  },
+  "5": {
+    "inputs": {
+      "images": [
+        "3",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Sticker RGB"
+    }
+  },
+  "6": {
+    "inputs": {
+      "mask": [
+        "3",
+        2
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "Sticker Mask to Image"
+    }
+  },
+  "7": {
+    "inputs": {
+      "images": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Sticker Mask"
+    }
+  },
+  "8": {
+    "inputs": {
+      "filename_prefix": "OPS/mockup",
+      "images": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Mockup"
+    }
+  }
+}
