@@ -1,0 +1,230 @@
+{
+  "1": {
+    "inputs": {
+      "image": "YOUR_ARTWORK.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Artwork"
+    }
+  },
+  "10": {
+    "inputs": {
+      "image": "CARD MOCK UP.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Card Template"
+    }
+  },
+  "11": {
+    "inputs": {
+      "image": "CARD MOCK UP MASK.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Card Mask"
+    }
+  },
+  "12": {
+    "inputs": {
+      "artwork": [
+        "1",
+        0
+      ],
+      "template": [
+        "10",
+        0
+      ],
+      "mask_image": [
+        "11",
+        0
+      ],
+      "fit_mode": "contain",
+      "mask_channel": "luminance",
+      "invert_mask": false,
+      "scale_percent": 100.0,
+      "x_offset": 0,
+      "y_offset": 0,
+      "rotation": 0.0,
+      "mask_inset": 0,
+      "edge_blend": 0.5,
+      "shading_strength": 0.0
+    },
+    "class_type": "OPSProductTemplateMockup",
+    "_meta": {
+      "title": "OPS Card Template Mockup"
+    }
+  },
+  "13": {
+    "inputs": {
+      "images": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Card"
+    }
+  },
+  "14": {
+    "inputs": {
+      "filename_prefix": "OPS/template_card",
+      "images": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Card Mockup"
+    }
+  },
+  "20": {
+    "inputs": {
+      "image": "Small Badge.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "30mm Badge Template"
+    }
+  },
+  "21": {
+    "inputs": {
+      "image": "Small Badge Mask.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "30mm Badge Mask"
+    }
+  },
+  "22": {
+    "inputs": {
+      "artwork": [
+        "1",
+        0
+      ],
+      "template": [
+        "20",
+        0
+      ],
+      "mask_image": [
+        "21",
+        0
+      ],
+      "fit_mode": "cover",
+      "mask_channel": "luminance",
+      "invert_mask": false,
+      "scale_percent": 100.0,
+      "x_offset": 0,
+      "y_offset": 0,
+      "rotation": 0.0,
+      "mask_inset": 12,
+      "edge_blend": 0.5,
+      "shading_strength": 0.35
+    },
+    "class_type": "OPSProductTemplateMockup",
+    "_meta": {
+      "title": "OPS 30mm Badge Mockup"
+    }
+  },
+  "23": {
+    "inputs": {
+      "images": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview 30mm Badge"
+    }
+  },
+  "24": {
+    "inputs": {
+      "filename_prefix": "OPS/template_badge_30mm",
+      "images": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save 30mm Badge"
+    }
+  },
+  "30": {
+    "inputs": {
+      "image": "Large Badge.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "55mm Badge Template"
+    }
+  },
+  "31": {
+    "inputs": {
+      "image": "Large Badge Mask.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "55mm Badge Mask"
+    }
+  },
+  "32": {
+    "inputs": {
+      "artwork": [
+        "1",
+        0
+      ],
+      "template": [
+        "30",
+        0
+      ],
+      "mask_image": [
+        "31",
+        0
+      ],
+      "fit_mode": "cover",
+      "mask_channel": "luminance",
+      "invert_mask": false,
+      "scale_percent": 100.0,
+      "x_offset": 0,
+      "y_offset": 0,
+      "rotation": 0.0,
+      "mask_inset": 12,
+      "edge_blend": 0.5,
+      "shading_strength": 0.35
+    },
+    "class_type": "OPSProductTemplateMockup",
+    "_meta": {
+      "title": "OPS 55mm Badge Mockup"
+    }
+  },
+  "33": {
+    "inputs": {
+      "images": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview 55mm Badge"
+    }
+  },
+  "34": {
+    "inputs": {
+      "filename_prefix": "OPS/template_badge_55mm",
+      "images": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save 55mm Badge"
+    }
+  }
+}
