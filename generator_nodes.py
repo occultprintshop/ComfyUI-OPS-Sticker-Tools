@@ -51,7 +51,10 @@ class OPSSquareImagePrep:
                     "FLOAT",
                     {"default": 4.0, "min": 0.0, "max": 25.0, "step": 0.5},
                 ),
-            }
+            },
+            "optional": {
+                "square_size_override": ("INT", {"forceInput": True}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE", "STRING")
@@ -59,8 +62,9 @@ class OPSSquareImagePrep:
     FUNCTION = "prepare"
     CATEGORY = "OPS/Generation"
 
-    def prepare(self, image, square_size, fit_mode, background, margin_percent):
-        size = int(square_size)
+    def prepare(self, image, square_size, fit_mode, background, margin_percent, square_size_override=None):
+        size = int(square_size_override) if square_size_override is not None else int(square_size)
+        size = max(256, min(4096, size))
         bg = _background_rgb(background)
         output = []
 
@@ -98,7 +102,6 @@ class OPSGeneratorConfig:
     """One place to choose the provider and record the preferred native settings for each API branch."""
 
     GENERATORS = ("OpenAI", "Grok", "Seedream")
-    # 1024 and 2048 are the common square targets across the three current providers.
     SQUARE_SIZES = ("1024", "2048")
 
     OPENAI_MODELS = ("gpt-image-1", "gpt-image-1.5", "gpt-image-2")
@@ -231,7 +234,6 @@ class OPSGeneratorRouter:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                # Feed this from OPS Generator Config so one dropdown controls every router in the workflow.
                 "generator": ("STRING", {"forceInput": True}),
             },
             "optional": {
