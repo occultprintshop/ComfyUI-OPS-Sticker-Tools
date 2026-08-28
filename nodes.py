@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 
 # ---------- Tensor / PIL helpers ----------
@@ -172,6 +172,15 @@ def _make_sticker(
 ) -> Tuple[Image.Image, Image.Image, Image.Image]:
     art = image.convert("RGB")
     subject_mask = _foreground_mask(art, removal_mode, white_threshold, edge_feather)
+
+    # Give the cutline real working room BEFORE growing the border. Without
+    # this, artwork that reaches an input edge can only expand inward and the
+    # sticker outline gets visibly chopped flat at that edge. White padding is
+    # used for the RGB art while the mask gets transparent/zero padding.
+    work_padding = max(16, int(border_size) * 2 + int(round(float(border_softness) * 4.0)) + 8)
+    art = ImageOps.expand(art, border=work_padding, fill=(255, 255, 255))
+    subject_mask = ImageOps.expand(subject_mask, border=work_padding, fill=0)
+
     sticker_mask = _expand_mask(subject_mask, border_size)
 
     if border_softness > 0:
