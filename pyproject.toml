@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-ops-sticker-tools"
+version = "0.1.0"
+description = "Sticker featured-image and mockup tools for ComfyUI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/occultprintshop/ComfyUI-OPS-Sticker-Tools"
+
+[tool.comfy]
+PublisherId = "occultprintshop"
+DisplayName = "OPS Sticker Tools"
+Icon = ""
