@@ -95,10 +95,11 @@ class OPSSquareImagePrep:
 
 
 class OPSGeneratorConfig:
-    """One place to choose the preferred provider and store provider-specific model settings."""
+    """One place to choose the provider and record the preferred native settings for each API branch."""
 
     GENERATORS = ("OpenAI", "Grok", "Seedream")
-    SQUARE_SIZES = ("1024", "1536", "2048")
+    # 1024 and 2048 are the common square targets across the three current providers.
+    SQUARE_SIZES = ("1024", "2048")
 
     OPENAI_MODELS = ("gpt-image-1", "gpt-image-1.5", "gpt-image-2")
     OPENAI_QUALITY = ("low", "medium", "high")
@@ -108,11 +109,10 @@ class OPSGeneratorConfig:
         "grok-imagine-image-quality",
         "grok-imagine-image-pro",
     )
-    GROK_RESOLUTION = ("1K", "2K")
 
     SEEDREAM_MODELS = (
-        "seedream 4.0",
-        "seedream 4.5",
+        "seedream-4-0-250828",
+        "seedream-4-5-251128",
         "seedream 5.0 lite",
         "seedream 5.0 pro",
     )
@@ -127,8 +127,7 @@ class OPSGeneratorConfig:
                 "openai_model": (cls.OPENAI_MODELS, {"default": "gpt-image-1.5"}),
                 "openai_quality": (cls.OPENAI_QUALITY, {"default": "low"}),
                 "grok_model": (cls.GROK_MODELS, {"default": "grok-imagine-image"}),
-                "grok_resolution": (cls.GROK_RESOLUTION, {"default": "1K"}),
-                "seedream_model": (cls.SEEDREAM_MODELS, {"default": "seedream 4.0"}),
+                "seedream_model": (cls.SEEDREAM_MODELS, {"default": "seedream-4-0-250828"}),
                 "seedream_prompt_optimization": (
                     cls.SEEDREAM_PROMPT_OPTIMIZATION,
                     {"default": "standard"},
@@ -156,11 +155,11 @@ class OPSGeneratorConfig:
         openai_model,
         openai_quality,
         grok_model,
-        grok_resolution,
         seedream_model,
         seedream_prompt_optimization,
     ):
         size = int(square_size)
+        grok_resolution = "1K" if size <= 1024 else "2K"
 
         if generator == "OpenAI":
             selected_model = openai_model
@@ -226,15 +225,14 @@ class OPSGeneratorConfig:
 
 
 class OPSGeneratorRouter:
-    """Lazy image router: only requests the API branch selected in the dropdown."""
-
-    GENERATORS = ("OpenAI", "Grok", "Seedream")
+    """Lazy image router: only requests the API branch selected by OPS Generator Config."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "generator": (cls.GENERATORS, {"default": "Grok"}),
+                # Feed this from OPS Generator Config so one dropdown controls every router in the workflow.
+                "generator": ("STRING", {"forceInput": True}),
             },
             "optional": {
                 "openai_image": ("IMAGE", {"lazy": True}),
@@ -249,12 +247,22 @@ class OPSGeneratorRouter:
     CATEGORY = "OPS/Generation"
 
     @staticmethod
-    def _input_for(generator: str) -> str:
+    def _normalise_generator(generator: str) -> str:
+        value = str(generator or "Grok").strip().lower()
+        if value == "openai":
+            return "OpenAI"
+        if value == "seedream":
+            return "Seedream"
+        return "Grok"
+
+    @classmethod
+    def _input_for(cls, generator: str) -> str:
+        generator = cls._normalise_generator(generator)
         return {
             "OpenAI": "openai_image",
             "Grok": "grok_image",
             "Seedream": "seedream_image",
-        }.get(generator, "grok_image")
+        }[generator]
 
     def check_lazy_status(
         self,
@@ -278,11 +286,12 @@ class OPSGeneratorRouter:
         grok_image=None,
         seedream_image=None,
     ):
+        generator = self._normalise_generator(generator)
         selected = {
             "OpenAI": openai_image,
             "Grok": grok_image,
             "Seedream": seedream_image,
-        }.get(generator, grok_image)
+        }[generator]
 
         if selected is None:
             selected = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
