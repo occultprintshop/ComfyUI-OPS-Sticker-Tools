@@ -114,18 +114,32 @@ def _foreground_mask(
 
 
 def _expand_mask(mask: Image.Image, radius: int) -> Image.Image:
+    """
+    Create a rounded, merged sticker silhouette.
+
+    The original implementation used Pillow MaxFilter, which expands with a
+    square kernel and can leave visible staircase/block artefacts around curved
+    artwork. A Gaussian-distance style expansion is much more isotropic: close
+    fragments naturally merge and the resulting cut line is rounded.
+    """
     if radius <= 0:
         return mask.copy()
 
-    # Pillow requires an odd filter size. Very wide borders are done in chunks
-    # to keep MaxFilter memory/runtime reasonable.
-    out = mask
-    remaining = int(radius)
-    while remaining > 0:
-        step = min(remaining, 32)
-        out = out.filter(ImageFilter.MaxFilter(step * 2 + 1))
-        remaining -= step
-    return out
+    # Normalise tiny anti-aliased/noisy gaps before growing the cut silhouette.
+    # A very small close operation joins 1 px cracks without materially changing
+    # the artwork shape.
+    clean = mask.filter(ImageFilter.GaussianBlur(radius=0.7))
+    clean = clean.point(lambda p: 255 if p >= 96 else 0)
+    clean = clean.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+
+    # Smooth radial expansion. The 0.72 factor + low threshold approximates the
+    # requested border radius while avoiding the boxy geometry of MaxFilter.
+    sigma = max(0.8, float(radius) * 0.72)
+    expanded = clean.filter(ImageFilter.GaussianBlur(radius=sigma))
+    expanded = expanded.point(lambda p: 255 if p >= 55 else 0)
+
+    # Restore a soft anti-aliased edge after thresholding.
+    return expanded.filter(ImageFilter.GaussianBlur(radius=0.75))
 
 
 def _crop_with_padding(
